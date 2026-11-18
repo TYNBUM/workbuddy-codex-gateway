@@ -1,0 +1,15 @@
+{
+  "port": 18789,
+  "defaultEffort": "medium",
+  "networkProxy": null,
+  "requestTimeoutMs": 300000,
+  "maxBodyBytes": 33554432,
+  "maxConcurrentRequests": 4,
+  "models": [
+    {
+      "id": "codex-model",
+      "name": "Codex",
+      "upstream": "REPLACE_WITH_YOUR_CODEX_MODEL"
+    }
+  ]
+}

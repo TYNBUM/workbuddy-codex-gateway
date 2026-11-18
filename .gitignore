@@ -1,0 +1,24 @@
+node_modules/
+*.log
+*.zip
+.local/
+
+# Machine-specific configuration and runtime state must never be published.
+gateway.config.json
+gateway.config.*.local.json
+.env
+.env.*
+!.env.example
+auth.json
+local-key
+config-history-*.json
+*.bak
+*.tmp
+*.pem
+*.key
+.runtime/
+WorkBuddyCodexGateway/
+.codex/
+.workbuddy/
+.DS_Store
+Thumbs.db

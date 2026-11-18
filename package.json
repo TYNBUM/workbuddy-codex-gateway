@@ -1,0 +1,15 @@
+{
+  "name": "workbuddy-codex-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local OpenAI-compatible WorkBuddy gateway using an existing Codex ChatGPT login",
+  "engines": { "node": ">=24.5" },
+  "scripts": {
+    "start": "node cli.mjs start",
+    "stop": "node cli.mjs stop",
+    "doctor": "node cli.mjs doctor",
+    "configure": "node cli.mjs configure",
+    "test": "node --test test/*.test.mjs"
+  }
+}
