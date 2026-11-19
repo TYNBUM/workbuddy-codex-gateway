@@ -43,7 +43,7 @@ node .\cli.mjs remove-config
 node .\cli.mjs restore-config
 ```
 
-`doctor` 仅检查本地登录模式、模型配置和健康状态，不发送模型推理请求。它不会显示 Codex token 或网关密钥。健康检查通过不代表账号额度或每个模型已通过真实调用验证。
+`doctor` 仅检查本地登录模式、模型配置和健康状态，不发送模型推理请求。配置了思考强度时，它还会核对 WorkBuddy 中的默认档位和支持档位列表，避免只检查模型 ID 就误把旧配置判定为正确。它不会显示 Codex token 或网关密钥。健康检查通过不代表账号额度或每个模型已通过真实调用验证。
 
 WorkBuddy 国际版或自定义配置目录可以显式指定目标：
 
@@ -74,13 +74,42 @@ node .\cli.mjs doctor --workbuddy-config "$env:USERPROFILE\.workbuddy-ai\models.
     {
       "id": "codex-model",
       "name": "Codex",
-      "upstream": "REPLACE_WITH_YOUR_CODEX_MODEL"
+      "upstream": "REPLACE_WITH_YOUR_CODEX_MODEL",
+      "reasoning": {
+        "defaultEffort": "medium",
+        "supportedEfforts": ["medium", "high", "xhigh", "max"]
+      }
     }
   ]
 }
 ```
 
 `id` 是 WorkBuddy 使用的唯一模型标识，`name` 是界面显示名称，`upstream` 是实际 Codex 模型名。必须替换占位符，并确保账号有权使用该模型。此片段只说明模型条目；完整配置请以 `gateway.config.example.json` 为准。
+
+### 思考强度
+
+支持该能力的 WorkBuddy 版本可在**同一个模型**下选择思考强度，无需为中、高、极高分别创建重复模型。上例声明四个档位：
+
+| WorkBuddy 档位 | 发往网关的值 |
+| --- | --- |
+| 中 / Medium | `medium` |
+| 高 / High | `high` |
+| 极高 / X-High | `xhigh` |
+| Max | `max` |
+
+`configure` 会把 `reasoning.defaultEffort` 和 `reasoning.supportedEfforts` 同步到 WorkBuddy。显式声明支持列表很重要：某些 WorkBuddy 版本在缺少能力声明时，会将 `xhigh`、`max` 降为 `high`。网关接收 WorkBuddy 的 `reasoning_effort`，并转为上游的 `reasoning.effort`；没有显式选择时使用该模型的 `defaultEffort`。旧配置可以省略整个 `reasoning`，继续使用原有默认行为。
+
+支持列表允许 `low`、`medium`、`high`、`xhigh`、`max`，必须非空、无重复，默认档位必须在列表内。**配置声明不等于上游支持**：请根据模型和账号的真实测试结果保留可用档位，不支持时网关会报错，不会自动换成较低档位。Max 使用实际的 `max` 参数，不会标成 Ultra，也不会把不支持的 `ultra` 悄悄替换后宣称成功。
+
+修改档位配置后，重新运行 `configure`，再执行 `stop`、`start` 重新加载网关；回到 WorkBuddy 重新选择模型并检查思考强度菜单。可以运行以下命令，逐档检查实际转发值、上游返回值与推理 Token：
+
+```powershell
+node verify-reasoning.mjs
+# 多模型配置时，指定需要验证的网关模型 ID：
+node verify-reasoning.mjs codex-model
+```
+
+这是实际模型请求，会消耗少量 Codex 额度。测试方法及其边界见 [VALIDATION.md](VALIDATION.md)。
 
 `start` 启用 Node 的环境代理支持；若配置提供 `networkProxy`，会设置子进程的 HTTP/HTTPS 代理，并让本机回环请求绕过代理。高级配置可设置 `codexAuthFile`、`codexCommand`；默认自动查找当前用户的 Codex 登录文件与命令。环境变量 `WB_CODEX_CONFIG` 可指定另一份网关配置，`WB_CODEX_STATE_DIR` 可指定运行文件目录。
 
@@ -100,6 +129,7 @@ node .\cli.mjs remove-config
 ## 常见问题
 
 - **只能聊天、不能操作文件**：确认 WorkBuddy 选中了 Codex 模型，并启用该模型的“工具调用”。连接测试不能替代实际工具回合验证。
+- **极高或 Max 没有出现，或看似与高档相同**：运行 `configure` 同步 `reasoning.supportedEfforts`，再运行 `doctor`。用 `verify-reasoning.mjs` 核验实际请求参数，不能仅凭回答长度判断档位是否生效。
 - **401 或登录已过期**：使用 Codex 自带登录流程重新登录 ChatGPT 账号，再重试。不要把账号 token 手动粘贴进 WorkBuddy。
 - **429、额度耗尽或某模型不可用**：以当前 Codex 账号的模型权限和限额为准，等待恢复或选择账号可用模型。
 - **端口被占用**：先执行 `status`。脚本不会终止占用该端口的其他应用。

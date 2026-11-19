@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 export const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const stateDir = process.env.WB_CODEX_STATE_DIR || path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), '.local', 'state'), 'WorkBuddyCodexGateway');
 export const UPSTREAM_URL = 'https://chatgpt.com/backend-api/codex/responses';
+// These are the canonical levels accepted by WorkBuddy's model configuration.
+// A valid level still needs to be supported by the chosen upstream model.
+export const WORKBUDDY_REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 
 export function findCodexCommand() {
   if (process.platform === 'win32') {
@@ -47,6 +50,17 @@ export function loadConfig({ file = process.env.WB_CODEX_CONFIG || path.join(roo
   for (const model of config.models) {
     if (!model || ['id', 'name', 'upstream'].some((key) => typeof model[key] !== 'string' || !model[key].trim()) || ids.has(model.id)) throw new Error('Invalid or duplicate model entry.');
     if (model.upstream.startsWith('REPLACE_WITH_')) throw new Error(`配置模板已准备好：${file}。请先将 models[].upstream 改为你的 Codex 账号可用的模型名称，再重新运行。`);
+    if (model.reasoning !== undefined) {
+      const reasoning = model.reasoning;
+      if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning)) throw new Error(`Invalid reasoning configuration for model ${model.id}.`);
+      const supported = reasoning.supportedEfforts;
+      if (!Array.isArray(supported) || !supported.length || new Set(supported).size !== supported.length || supported.some((effort) => !WORKBUDDY_REASONING_EFFORTS.includes(effort))) {
+        throw new Error(`Invalid reasoning.supportedEfforts for model ${model.id}; use a non-empty, unique array of ${WORKBUDDY_REASONING_EFFORTS.join(', ')}.`);
+      }
+      if (!WORKBUDDY_REASONING_EFFORTS.includes(reasoning.defaultEffort) || !supported.includes(reasoning.defaultEffort)) {
+        throw new Error(`Invalid reasoning.defaultEffort for model ${model.id}; it must be included in reasoning.supportedEfforts.`);
+      }
+    }
     ids.add(model.id);
   }
   if (config.networkProxy && !['http:', 'https:'].includes(new URL(config.networkProxy).protocol)) throw new Error('Invalid networkProxy protocol.');

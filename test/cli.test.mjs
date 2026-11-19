@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { configureModels, removeModels, restoreModels, managedEntries } from '../cli.mjs';
+import { configureModels, removeModels, restoreModels, managedEntries, matchesReasoningConfig } from '../cli.mjs';
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const scratch = join(workspace, 'work', 'cli-tests');
@@ -107,4 +107,46 @@ test('configure missing file uses array and restore removes only inserted entrie
   assert.equal(Array.isArray(read(context)), true);
   assert.equal(restoreModels(context).count, 1);
   assert.deepEqual(read(context), []);
+});
+
+test('configure upgrades existing model reasoning capabilities without duplicating it', (t) => {
+  const previous = managedEntries(config, key)[0];
+  const context = fixture(t, [previous, { id: 'other-model', custom: true }]);
+  const reasoning = { defaultEffort: 'medium', supportedEfforts: ['medium', 'high', 'xhigh', 'max'] };
+  context.config = { ...config, models: [{ ...config.models[0], reasoning }] };
+  const desired = managedEntries(context.config, key)[0];
+  assert.equal(matchesReasoningConfig(desired, previous), false);
+  assert.equal(configureModels(context).changed, true);
+  const result = read(context);
+  assert.equal(result.length, 2);
+  assert.deepEqual(result[0].reasoning, reasoning);
+  assert.deepEqual(result[1], { id: 'other-model', custom: true });
+  assert.equal(matchesReasoningConfig(desired, result[0]), true);
+  assert.equal(configureModels(context).changed, false);
+  assert.equal(restoreModels(context).count, 1);
+  assert.equal(read(context)[0].reasoning, undefined);
+});
+
+test('doctor reasoning check detects stale defaults, reduced levels and disabled reasoning', () => {
+  const expected = { supportsReasoning: true, reasoning: { defaultEffort: 'medium', supportedEfforts: ['medium', 'high', 'xhigh', 'max'] } };
+  assert.equal(matchesReasoningConfig(expected, { supportsReasoning: true }), false);
+  assert.equal(matchesReasoningConfig(expected, { ...expected, reasoning: { ...expected.reasoning, defaultEffort: 'high' } }), false);
+  assert.equal(matchesReasoningConfig(expected, { ...expected, reasoning: { ...expected.reasoning, supportedEfforts: ['medium', 'high'] } }), false);
+  assert.equal(matchesReasoningConfig(expected, { ...expected, reasoning: { ...expected.reasoning, supportedEfforts: ['medium', 'high', 'high', 'max'] } }), false);
+  assert.equal(matchesReasoningConfig(expected, { ...expected, supportsReasoning: false }), false);
+  assert.equal(matchesReasoningConfig(expected, { ...expected, reasoning: { ...expected.reasoning, supportedEfforts: ['max', 'xhigh', 'high', 'medium'] } }), true);
+});
+
+test('legacy model settings remain compatible when no reasoning capability is declared', () => {
+  const entry = managedEntries(config, key)[0];
+  assert.equal(entry.reasoning, undefined);
+  assert.equal(matchesReasoningConfig(entry, { supportsReasoning: true }), true);
+});
+
+test('managed reasoning capabilities do not share their array with source config', () => {
+  const reasoning = { defaultEffort: 'medium', supportedEfforts: ['medium', 'high', 'xhigh', 'max'] };
+  const configured = { ...config, models: [{ ...config.models[0], reasoning }] };
+  const entry = managedEntries(configured, key)[0];
+  entry.reasoning.supportedEfforts.pop();
+  assert.deepEqual(reasoning.supportedEfforts, ['medium', 'high', 'xhigh', 'max']);
 });

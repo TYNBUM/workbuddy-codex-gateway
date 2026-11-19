@@ -97,3 +97,51 @@ test('closing a streaming client cancels upstream generation', async (t) => {
   if (!signal.aborted) await once(signal, 'abort');
   assert.equal(signal.aborted, true);
 });
+
+const reasoning = {defaultEffort: 'medium', supportedEfforts: ['medium', 'high', 'xhigh', 'max']};
+test('all configured effort levels are forwarded exactly and confirmed by upstream headers', async (t) => {
+  const f = await fixture(t, {models: [{...config.models[0], reasoning}]}, {fetch: async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    return upstream([{...completed, response: {...completed.response, reasoning: {effort: payload.reasoning.effort}, usage: {input_tokens: 1, output_tokens: 5, total_tokens: 6, output_tokens_details: {reasoning_tokens: 3}}}}]);
+  }});
+  for (const effort of reasoning.supportedEfforts) {
+    const response = await f.request({...request, reasoning_effort: effort});
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-codex-reasoning-effort'), effort);
+    assert.equal(response.headers.get('x-codex-upstream-reasoning-effort'), effort);
+    await response.json();
+    const health = await (await fetch(f.base + '/health')).json();
+    assert.equal(health.lastCompletion.requestedEffort, effort);
+    assert.equal(health.lastCompletion.effectiveEffort, effort);
+    assert.equal(health.lastCompletion.upstreamEffort, effort);
+    assert.equal(health.lastCompletion.reasoningTokens, 3);
+  }
+});
+
+test('per-model default and nested effort work while explicit effort takes precedence', async (t) => {
+  const seen = [];
+  const f = await fixture(t, {models: [{...config.models[0], reasoning: {...reasoning, defaultEffort: 'xhigh'}}]}, {fetch: async (_url, options) => {
+    seen.push(JSON.parse(options.body).reasoning.effort); return upstream();
+  }});
+  for (const body of [request, {...request, reasoning: {effort: 'max'}}, {...request, reasoning: {effort: 'max'}, reasoning_effort: 'high'}]) {
+    const response = await f.request(body); assert.equal(response.status, 200); await response.arrayBuffer();
+  }
+  assert.deepEqual(seen, ['xhigh', 'max', 'high']);
+});
+
+test('unsupported ultra is rejected without silently downgrading or contacting upstream', async (t) => {
+  let calls = 0;
+  const f = await fixture(t, {models: [{...config.models[0], reasoning}]}, {fetch: async () => {calls++; return upstream();}});
+  const response = await f.request({...request, reasoning_effort: 'ultra'});
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, 'unsupported_reasoning_effort');
+  assert.equal(calls, 0);
+});
+
+test('missing upstream confirmation is not fabricated from the requested effort', async (t) => {
+  const f = await fixture(t);
+  const response = await f.request({...request, reasoning_effort: 'high'});
+  assert.equal(response.headers.get('x-codex-reasoning-effort'), 'high');
+  assert.equal(response.headers.get('x-codex-upstream-reasoning-effort'), null);
+  await response.arrayBuffer();
+});

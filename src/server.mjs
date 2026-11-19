@@ -88,7 +88,13 @@ export async function startServer(config, dependencies = {}) {
       const model = config.models.find((item) => item.id === body.model);
       if (!model) throw problem(400, 'Unknown model; use an ID from /v1/models.', 'model_not_found');
       selectedModel = model.upstream;
-      const { payload, toolNames } = toResponses(body, { model: model.upstream, effort: model.effort || config.defaultEffort, reasoningCache });
+      const { payload, toolNames } = toResponses(body, { model: model.upstream, effort: model.reasoning?.defaultEffort || model.effort || config.defaultEffort, reasoningCache });
+      const effectiveEffort = payload.reasoning?.effort;
+      if (model.reasoning?.supportedEfforts && !model.reasoning.supportedEfforts.includes(effectiveEffort)) {
+        throw problem(400, `Unsupported reasoning effort for this route. Choose: ${model.reasoning.supportedEfforts.join(', ')}.`, 'unsupported_reasoning_effort');
+      }
+      res.setHeader('x-codex-request-id', requestId);
+      if (effectiveEffort) res.setHeader('x-codex-reasoning-effort', effectiveEffort);
       let upstream;
       for (let attempt = 0; attempt < 2; attempt++) {
         const auth = await getAuth(attempt === 1);
@@ -117,7 +123,17 @@ export async function startServer(config, dependencies = {}) {
       // The parser and terminal-event checks still validate the actual body.
       const contentType = upstream.headers.get('content-type');
       if (contentType && !contentType.toLowerCase().includes('text/event-stream')) { await upstream.body?.cancel(); throw problem(502, 'Codex upstream did not return an SSE stream.', 'invalid_upstream_content_type'); }
-      const events = parseSSE(upstream.body);
+      let upstreamEffort = null, reasoningTokens = null;
+      async function* observedEvents() {
+        for await (const event of parseSSE(upstream.body)) {
+          if (event.type === 'response.completed') {
+            upstreamEffort = event.response?.reasoning?.effort ?? null;
+            reasoningTokens = event.response?.usage?.output_tokens_details?.reasoning_tokens ?? null;
+          }
+          yield event;
+        }
+      }
+      const events = observedEvents();
       const options = { model: model.id, cacheModel: model.upstream, reasoningCache, toolNames, includeUsage: body.stream_options?.include_usage === true };
       let toolCalls = false;
       if (body.stream === true) {
@@ -133,10 +149,13 @@ export async function startServer(config, dependencies = {}) {
       } else {
         const completion = await collectResponse(events, options);
         toolCalls = Boolean(completion.choices?.[0]?.message?.tool_calls?.length);
+        if (upstreamEffort) res.setHeader('x-codex-upstream-reasoning-effort', upstreamEffort);
         json(res, 200, completion);
       }
       stats.completed++;
-      stats.lastCompletion = { at: new Date().toISOString(), model: model.id, upstream: model.upstream, toolCalls };
+      stats.lastCompletion = { at: new Date().toISOString(), requestId, model: model.id, upstream: model.upstream, toolCalls,
+        requestedEffort: body.reasoning_effort ?? body.reasoning?.effort ?? null,
+        effectiveEffort, upstreamEffort, reasoningTokens };
     } catch (error) {
       stats.failed++;
       const status = timedOut ? 504 : (error.status || error.statusCode || 502);

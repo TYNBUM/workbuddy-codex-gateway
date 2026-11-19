@@ -89,9 +89,22 @@ export function managedEntries(config, localKey) {
     supportsImages: true,
     supportsReasoning: true,
     useCustomProtocol: false,
+    ...(model.reasoning ? { reasoning: { ...model.reasoning, supportedEfforts: [...model.reasoning.supportedEfforts] } } : {}),
     ...(model.maxInputTokens ? { maxInputTokens: model.maxInputTokens } : {}),
     ...(model.maxOutputTokens ? { maxOutputTokens: model.maxOutputTokens } : {}),
   }));
+}
+
+export function matchesReasoningConfig(expected, actual) {
+  if (!expected.reasoning) return true;
+  const desired = expected.reasoning;
+  const installed = actual?.reasoning;
+  return actual?.supportsReasoning === true
+    && installed?.defaultEffort === desired.defaultEffort
+    && Array.isArray(installed.supportedEfforts)
+    && installed.supportedEfforts.length === desired.supportedEfforts.length
+    && new Set(installed.supportedEfforts).size === installed.supportedEfforts.length
+    && desired.supportedEfforts.every((effort) => installed.supportedEfforts.includes(effort));
 }
 
 export function configureModels({ config, localKey, targetPath = DEFAULT_CONFIG, stateDirectory = stateDir }) {
@@ -281,6 +294,10 @@ async function doctor(config, targetPath) {
       for (const identity of identities) {
         const match = models.find((model) => model.id === identity.id && model.url === identity.url);
         if (match) check(match.supportsToolCall === true, `${identity.id} 的工具调用${match.supportsToolCall ? '已启用' : '未启用'}`);
+        if (match && identity.reasoning) {
+          const consistent = matchesReasoningConfig(identity, match);
+          check(consistent, `${identity.id} 的思考强度${consistent ? '配置一致' : '配置不一致，请重新执行 configure'}（默认 ${identity.reasoning.defaultEffort}；支持 ${identity.reasoning.supportedEfforts.join('/')}）`);
+        }
       }
     } catch { check(false, 'WorkBuddy 模型配置无法解析。'); }
   } else check(false, `WorkBuddy 模型配置不存在：${targetPath}`);

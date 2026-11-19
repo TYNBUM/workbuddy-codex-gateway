@@ -38,3 +38,50 @@ test('invalid configuration is never overwritten by a template', (t) => {
   assert.throws(() => loadConfig({ file }));
   assert.equal(fs.readFileSync(file, 'utf8'), '{unfinished');
 });
+
+test('per-model reasoning defaults and supported levels are preserved', (t) => {
+  const file = fixture(t);
+  const reasoning = { defaultEffort: 'xhigh', supportedEfforts: ['medium', 'high', 'xhigh', 'max'] };
+  const original = JSON.stringify({ models: [{ id: 'model', name: 'Model', upstream: 'account-model', reasoning }] });
+  fs.writeFileSync(file, original);
+  const loaded = loadConfig({ file });
+  assert.deepEqual(loaded.models[0].reasoning, reasoning);
+  assert.equal(fs.readFileSync(file, 'utf8'), original);
+});
+
+test('reasoning configuration rejects malformed, duplicate and noncanonical levels', (t) => {
+  const file = fixture(t);
+  const invalid = [
+    null,
+    [],
+    'high',
+    {},
+    { defaultEffort: 'medium', supportedEfforts: [] },
+    { defaultEffort: 'medium', supportedEfforts: 'medium' },
+    { defaultEffort: 'medium', supportedEfforts: ['medium', 'medium'] },
+    { defaultEffort: 'medium', supportedEfforts: ['medium', 'ultra'] },
+    { defaultEffort: 'medium', supportedEfforts: ['medium', 'HIGH'] },
+    { defaultEffort: 'medium', supportedEfforts: ['medium', 'none'] },
+    { defaultEffort: 'medium', supportedEfforts: ['medium', 'minimal'] },
+    { defaultEffort: 'medium', supportedEfforts: ['medium', ' high'] },
+    { defaultEffort: 'medium', supportedEfforts: ['medium', null] },
+    { defaultEffort: 'high', supportedEfforts: ['medium'] },
+    { supportedEfforts: ['medium'] },
+  ];
+  for (const reasoning of invalid) {
+    const original = JSON.stringify({ models: [{ id: 'model', name: 'Model', upstream: 'account-model', reasoning }] });
+    fs.writeFileSync(file, original);
+    assert.throws(() => loadConfig({ file }), /Invalid reasoning/, JSON.stringify(reasoning));
+    assert.equal(fs.readFileSync(file, 'utf8'), original);
+  }
+});
+
+test('single supported reasoning level and legacy missing reasoning are accepted', (t) => {
+  const file = fixture(t);
+  const models = [
+    { id: 'single', name: 'Single', upstream: 'account-model', reasoning: { defaultEffort: 'max', supportedEfforts: ['max'] } },
+    { id: 'legacy', name: 'Legacy', upstream: 'account-model' },
+  ];
+  fs.writeFileSync(file, JSON.stringify({ models }));
+  assert.deepEqual(loadConfig({ file }).models, models);
+});

@@ -5,12 +5,14 @@ import { loadConfig, ensureLocalKey } from './src/config.mjs';
 
 const config = loadConfig();
 const model = config.models[0].id;
+const supported = config.models[0].reasoning?.supportedEfforts;
+const effort = !supported || supported.includes('low') ? 'low' : config.models[0].reasoning?.defaultEffort || supported[0];
 const url = `http://${config.host}:${config.port}/v1/chat/completions`;
 const key = ensureLocalKey();
 const tools = [{ type: 'function', function: { name: 'gateway_echo', description: 'Echo the test message.', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } } }];
 const messages = [{ role: 'user', content: 'Call gateway_echo exactly once with text GATEWAY_TOOL_OK. After receiving its result, reply with that exact result only.' }];
 async function post(body) {
-  const response = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, reasoning_effort: 'low', ...body }), signal: AbortSignal.timeout(120000) });
+  const response = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify({ model, reasoning_effort: effort, ...body }), signal: AbortSignal.timeout(120000) });
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
   return response;
 }

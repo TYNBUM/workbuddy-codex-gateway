@@ -9,7 +9,11 @@
     {
       "id": "codex-model",
       "name": "Codex",
-      "upstream": "REPLACE_WITH_YOUR_CODEX_MODEL"
+      "upstream": "REPLACE_WITH_YOUR_CODEX_MODEL",
+      "reasoning": {
+        "defaultEffort": "medium",
+        "supportedEfforts": ["medium", "high", "xhigh", "max"]
+      }
     }
   ]
 }
